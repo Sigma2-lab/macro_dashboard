@@ -84,6 +84,39 @@ def run_refresh() -> None:
     st.rerun()
 
 
+def run_refresh_selected(keys: list[str], title: str) -> None:
+    """Refresh only the given source series (one indicator card)."""
+    n_total = max(len(keys), 1)
+    counter = {"n": 0}
+
+    with st.status(f"Refreshing {title}...", expanded=True) as status_box:
+        prog = st.progress(0.0, text="Starting...")
+
+        def _callback(message: str) -> None:
+            counter["n"] += 1
+            fraction = min(counter["n"] / n_total, 1.0)
+            prog.progress(fraction, text=message)
+            st.write(message)
+
+        failed = data_downloader.run_selected(keys, progress_callback=_callback)
+
+        if failed:
+            status_box.update(
+                label=f"{title}: completed with errors. Check the log above.",
+                state="error",
+                expanded=True,
+            )
+        else:
+            status_box.update(
+                label=f"{title} refreshed successfully.",
+                state="complete",
+                expanded=False,
+            )
+
+    st.cache_data.clear()
+    st.rerun()
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Data-loading helpers  (frequency alignment via pd.merge_asof)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -449,6 +482,8 @@ METRICS = [
     dict(
         title="Debt / Fed Govt Revenues",
         subtitle="Federal debt as a multiple of trailing-12-month revenues",
+        can_series=["CAN_DEBT", "CAN_REV"],
+        us_series=["US_DEBT", "US_REV"],
         can_col="Debt / Fed Govt Revenues",
         us_col="Debt / Fed Govt Revenues",
         y_label="Ratio (x)",
@@ -461,6 +496,8 @@ METRICS = [
     dict(
         title="Deficit / Fed Govt Revenues",
         subtitle="TTM fiscal balance / TTM revenues — negative = deficit",
+        can_series=["CAN_FISC", "CAN_REV"],
+        us_series=["US_FISC", "US_REV"],
         can_col="Deficit / Fed Govt Revenues",
         us_col="Deficit / Fed Govt Revenues",
         y_label="Ratio",
@@ -473,6 +510,8 @@ METRICS = [
     dict(
         title="Interest / Fed Govt Revenues",
         subtitle="TTM interest payments / TTM revenues",
+        can_series=["CAN_INTEREST", "CAN_REV"],
+        us_series=["US_INTEREST", "US_REV"],
         can_col="Interest / Fed Govt Revenues",
         us_col="Interest / Fed Govt Revenues",
         y_label="Ratio",
@@ -485,6 +524,8 @@ METRICS = [
     dict(
         title="Real Yield Spread  (L-T minus S-T)",
         subtitle="(10Y nominal − 10Y infl. exp.) − (1Y nominal − 1Y infl. exp.)",
+        can_series=["CAN_1Y_TBILL", "CAN_10Y_TBILL", "CAN_10Y_INF", "CAN_1Y_INF"],
+        us_series=["US_1Y_TBILL", "US_10Y_TBILL", "US_1Y_INF", "US_10Y_INF"],
         can_col="L-T real yield - S-T real yield",
         us_col="L-T real yield - S-T real yield",
         y_label="pp",
@@ -500,6 +541,8 @@ METRICS = [
     dict(
         title="Real GDP Growth",
         subtitle="YoY: monthly output-based · QoQ ann.: expenditure-based, chained (2017) dollars",
+        can_series=["CAN_rGDP", "CAN_rGDP_EXP"],
+        us_series=["US_rGDP"],
         can_col="",
         us_col="",
         y_label="%",
@@ -523,6 +566,8 @@ METRICS = [
     dict(
         title="Current Account  (TTM)",
         subtitle="Trailing-12-month current account balance",
+        can_series=["CAN_CURRENT_ACCOUNT"],
+        us_series=["US_CAB"],
         can_col="CAN_CA_TTM",
         us_col="US_CA_TTM",
         y_label="Billions",
@@ -535,6 +580,8 @@ METRICS = [
     dict(
         title="Capital Flows  (Z-Score, 12Q rolling)",
         subtitle="Net lending / net borrowing — 12-quarter rolling Z-score",
+        can_series=["CAN_CAP_FLOWS"],
+        us_series=["US_CAP_FLOWS"],
         can_col="CAN_FLOWS_ZSCORE",
         us_col="US_FLOWS_ZSCORE",
         y_label="Z-Score",
@@ -548,6 +595,8 @@ METRICS = [
     dict(
         title="CB Balance Sheet  (3M Rolling Avg Change %)",
         subtitle="3-month rolling average of weekly % change in central bank total assets",
+        can_series=["CAN_CB_BS"],
+        us_series=["US_CB_BS"],
         can_col="3M_Rolling_Avg_Change_%",
         us_col="3M_Rolling_Avg_Change(%)",
         y_label="%",
@@ -565,6 +614,8 @@ METRICS = [
     dict(
         title="CPI Inflation",
         subtitle="Consumer Price Index — all-items, year-over-year and month-over-month",
+        can_series=["CAN_CPI"],
+        us_series=["US_CPI"],
         can_col="",
         us_col="",
         y_label="%",
@@ -754,7 +805,18 @@ def render_dashboard() -> None:
                 frequency  = m.get(freq_field, "")
 
                 with cols[j]:
-                    st.markdown(f"**{m['title']}**")
+                    series_field = "can_series" if country == "CAN" else "us_series"
+                    card_series  = m.get(series_field, [])
+                    title_col, refresh_col = st.columns([0.85, 0.15])
+                    with title_col:
+                        st.markdown(f"**{m['title']}**")
+                    with refresh_col:
+                        if card_series and st.button(
+                            "↻",
+                            key=f"refresh_{idx}_{country}",
+                            help="Refresh only this indicator's data",
+                        ):
+                            run_refresh_selected(card_series, m["title"])
                     caption = m["subtitle"]
                     if frequency:
                         caption = f"{caption}  ·  *{frequency}*"
